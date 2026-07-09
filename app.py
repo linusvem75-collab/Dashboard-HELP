@@ -5,6 +5,12 @@ Streamlit app version of the BI analysis: temporal trends, category
 profitability, customer segments, pricing sensitivity, and regional spread.
 
 Run locally:  streamlit run app.py
+
+NOTE: This is a deliberately single-file app. Everything data_prep.py used
+to hold now lives inline below — Streamlit Cloud (and most simple deploy
+targets) only ever see whatever files actually got committed to the repo,
+and a second local file is the #1 cause of "ModuleNotFoundError" on deploy
+even when the app runs fine locally. One file, nothing to leave behind.
 """
 
 import streamlit as st
@@ -13,7 +19,77 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-from data_prep import load_and_clean, kpi_summary
+# ------------------------------------------------------------------
+# DATA LOADING & CLEANING (formerly data_prep.py — inlined so the app
+# has zero cross-file dependencies)
+# ------------------------------------------------------------------
+
+@st.cache_data(show_spinner="Loading and cleaning data...")
+def load_and_clean(file_or_path) -> pd.DataFrame:
+    # --- load with encoding fallback ---
+    try:
+        df = pd.read_csv(file_or_path, encoding="utf-8")
+    except UnicodeDecodeError:
+        df = pd.read_csv(file_or_path, encoding="latin1")
+
+    # --- standardize column names ---
+    df.columns = [c.strip() for c in df.columns]
+
+    # --- trim whitespace on text columns (fixes the 1,612 -> 17 sub-category issue) ---
+    text_cols = df.select_dtypes(include="object").columns
+    for c in text_cols:
+        df[c] = df[c].astype(str).str.strip().str.replace(r"\s+", " ", regex=True)
+
+    # --- Order ID as text (identifier, not a quantity) ---
+    if "Order ID" in df.columns:
+        df["Order ID"] = df["Order ID"].astype(str)
+
+    # --- dates ---
+    df["Order Date"] = pd.to_datetime(df["Order Date"], errors="coerce")
+    df["Ship Date"] = pd.to_datetime(df["Ship Date"], errors="coerce")
+    df["Year"] = df["Order Date"].dt.year
+    df["Quarter"] = df["Order Date"].dt.quarter
+    df["Month"] = df["Order Date"].dt.month
+    df["YearMonth"] = df["Order Date"].dt.to_period("M").astype(str)
+    df["YearQuarter"] = df["Year"].astype(str) + "-Q" + df["Quarter"].astype(str)
+    df["Lead Time (days)"] = (df["Ship Date"] - df["Order Date"]).dt.days
+
+    # --- region split ---
+    if "Region & District" in df.columns:
+        split = df["Region & District"].str.split(",", n=1, expand=True)
+        df["Region"] = split[0].str.strip().str.title()
+        df["District"] = split[1].str.strip().str.title() if split.shape[1] > 1 else np.nan
+
+    # --- impute the only numeric column with missingness (median, per earlier normality test) ---
+    if "Product Base Margin" in df.columns:
+        df["Product Base Margin"] = df["Product Base Margin"].fillna(df["Product Base Margin"].median())
+
+    # --- derived financial fields ---
+    df["Margin %"] = np.where(df["Sales"] != 0, df["Profit"] / df["Sales"] * 100, np.nan)
+
+    # --- proper-case a few categorical columns for display ---
+    for c in ["Customer First Name", "Customer Last Name", "Order Priority",
+              "Customer Segment", "Product Category", "Product Sub-Category",
+              "Product Container"]:
+        if c in df.columns:
+            df[c] = df[c].str.title()
+
+    return df
+
+
+def kpi_summary(df: pd.DataFrame) -> dict:
+    total_sales = df["Sales"].sum()
+    total_profit = df["Profit"].sum()
+    margin = total_profit / total_sales * 100 if total_sales else 0
+    orders = df["Order ID"].nunique()
+    aov = total_sales / orders if orders else 0
+    return {
+        "total_sales": total_sales,
+        "total_profit": total_profit,
+        "margin": margin,
+        "orders": orders,
+        "aov": aov,
+    }
 
 # ------------------------------------------------------------------
 # PAGE CONFIG
