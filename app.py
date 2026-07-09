@@ -102,8 +102,6 @@ st.set_page_config(
 )
 
 PRIMARY = "#2a78d6"
-import pathlib
-
 GREEN = "#1baf7a"
 AMBER = "#eda100"
 RED = "#e34948"
@@ -115,29 +113,7 @@ CATEGORY_COLORS = {"Technology": PRIMARY, "Furniture": GREEN, "Office Supplies":
 st.sidebar.title("📊 Retail Sales Dashboard")
 
 uploaded = st.sidebar.file_uploader("Upload a CSV to replace the sample dataset", type=["csv"])
-
-# Resolve the bundled sample data relative to THIS SCRIPT's location, not the
-# process's working directory. Streamlit Cloud / Docker / different OSes don't
-# always launch with cwd == repo root, so a bare relative path like
-# "data/mock_dataset.csv" can silently break in deployment even though it
-# works locally. __file__ always points at this script's real location.
-APP_DIR = pathlib.Path(__file__).parent.resolve()
-BUNDLED_DATA_PATH = APP_DIR / "data" / "mock_dataset.csv"
-
-if uploaded is not None:
-    data_source = uploaded
-elif BUNDLED_DATA_PATH.exists():
-    data_source = BUNDLED_DATA_PATH
-else:
-    st.error(
-        "**No data available.** The bundled sample dataset "
-        f"(`{BUNDLED_DATA_PATH.name}`) wasn't found at `{BUNDLED_DATA_PATH}`.\n\n"
-        "This usually means the `data/` folder wasn't pushed to the deployed "
-        "repo (check `git status` / confirm it's not excluded by `.gitignore`, "
-        "and that it shows up in the file list on GitHub itself). "
-        "In the meantime, upload a CSV using the sidebar to continue."
-    )
-    st.stop()
+data_source = uploaded if uploaded is not None else "data/mock_dataset.csv"
 
 df = load_and_clean(data_source)
 
